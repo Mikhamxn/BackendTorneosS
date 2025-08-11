@@ -1,0 +1,30 @@
+# Ignora archivos temporales de Visual Studio
+.vs/
+*.user
+*.suo
+*.sdf
+*.cache
+*.dbmdl
+
+# Archivos de compilación
+bin/
+obj/
+
+# Archivos de configuración locales
+*.psess
+*.vsp
+*.csproj.user
+
+# Archivos generados
+*.log
+*.pidb
+*.svclog
+
+.env
+
+*.pfx
+*.snk
+*.pem
+*.cer
+appsettings.Development.json
+appsettings.Local.json
