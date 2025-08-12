@@ -78,7 +78,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("PermitirFrontend", builder =>
     {
-        builder.WithOrigins("http://localhost:5173", "http://mikhamxn.somee.com")
+        builder.WithOrigins("http://localhost:5173", "http://mikhamxn.somee.com", "https://www.gridstudio.app", "https://gridstudio.app")
                .AllowAnyHeader()
                .AllowAnyMethod()
                .AllowCredentials();
