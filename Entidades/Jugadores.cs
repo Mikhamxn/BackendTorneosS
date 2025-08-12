@@ -19,5 +19,10 @@ namespace BackendTorneosS.Entidades
         public double dblAltura { get; set; }
         public double dblPeso { get; set; }
         public bool bitCapitan { get; set; }
+        public int? intGoles { get; set; }
+        public int? intNumero { get; set; }
+        public int? intTarjetaAmarilla { get; set; }
+        public int? intTarjetaRoja { get; set; }
+        public int? intAsistencias { get; set; }
     }
 }

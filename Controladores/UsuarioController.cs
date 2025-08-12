@@ -33,10 +33,12 @@ namespace BackendTorneosS.Controladores
         public async Task<IActionResult> Login([FromBody] LoginDTO login)
         {
             var client = new HttpClient();
+
+            var secret = Environment.GetEnvironmentVariable("secret");
             var response = await client.PostAsync("https://www.google.com/recaptcha/api/siteverify",
                 new FormUrlEncodedContent(new Dictionary<string, string>
                 {
-            {"secret", "6Lf2tWsrAAAAAA9Fuxnpf8gIZa_0PG78TK9dYyZw"},
+            {"secret", secret},
             {"response", login.captcha}
                 }));
 
@@ -74,8 +76,11 @@ namespace BackendTorneosS.Controladores
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
+            var jti = Guid.NewGuid().ToString();
+
             var claims = new[]
             {
+                new Claim(JwtRegisteredClaimNames.Jti, jti),
                 new Claim(ClaimTypes.NameIdentifier, usuario.intUsuario.ToString()),
                 new Claim(ClaimTypes.Email, usuario.strCorreo.ToString()),
                 new Claim(ClaimTypes.Role, (usuario.isAdmin ?? false) ? "Admin" : "User")
@@ -85,16 +90,20 @@ namespace BackendTorneosS.Controladores
                 issuer: issuer,
                 audience: audience,
                 claims: claims,
-                expires: DateTime.UtcNow.AddDays(expireMinutes),
+                expires: DateTime.UtcNow.AddMinutes(expireMinutes),
                 signingCredentials: credentials
                 );
 
             var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
+
+
+
             var tokenHash = BCrypt.Net.BCrypt.HashPassword(tokenString); // se recomienda hashear
 
             var UsuarioSesion = new UsuarioSesion
             {
                 intUsuario = usuario.intUsuario,
+                strJti = jti,
                 strTokenHash = tokenHash,
                 strDeviceInfo = Request.Headers["User-Agent"].ToString(),
                 strIPAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
@@ -111,6 +120,7 @@ namespace BackendTorneosS.Controladores
                 HttpOnly = true,
                 Secure = true,
                 SameSite = SameSiteMode.None,
+                Path = "/",
                 Expires = DateTime.UtcNow.AddMinutes(expireMinutes)
             });
 
@@ -160,25 +170,35 @@ namespace BackendTorneosS.Controladores
 
         [Authorize]
         [HttpPost("logout")]
-        public async Task<IActionResult> logout()
+        public async Task<IActionResult> Logout()
         {
-            var token = HttpContext.Request.Cookies["access_token"];
-            if (string.IsNullOrEmpty(token))
-                return BadRequest("Token no encontrado en cookie");
+            var jti = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+            var sesion = await _context.UsuarioSesion.FirstOrDefaultAsync(s => s.strJti == jti);
+            if (sesion != null)
+            {
+                sesion.bitRevoked = true;
+                await _context.SaveChangesAsync();
+            }
 
-            var sesiones = await _context.UsuarioSesion.ToListAsync();
-            var sesion = sesiones.FirstOrDefault(s => BCrypt.Net.BCrypt.Verify(token, s.strTokenHash));
+            Response.Cookies.Delete("access_token", new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Path = "/"
+            });
+            Response.Cookies.Append("access_token", "", new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Path = "/",
+                Expires = DateTimeOffset.UnixEpoch
+            });
 
-            if (sesion == null)
-                return NotFound("Sesión no encontrada.");
-
-            sesion.bitRevoked = true;
-            await _context.SaveChangesAsync();
-
-            Response.Cookies.Delete("access_token");
-
-            return Ok("Sesión cerrada correctamente.");
+            return Ok("Sesión cerrada.");
         }
+
 
         [HttpPost("validar-sesion")]
         public async Task<bool> ValidarSesion(string token, DBContext _context)
@@ -242,6 +262,7 @@ namespace BackendTorneosS.Controladores
         }
 
         // GET: api/Usuario
+        [Authorize(Roles = "admin")]
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Usuarios>>> GetUsuarios()
         {
@@ -284,7 +305,8 @@ namespace BackendTorneosS.Controladores
         }
 
         // PUT: api/Usuario/5
-        [HttpPut("{id}")]
+        [Authorize(Roles = "admin")]
+        [HttpPut("{id:int}")]
         public async Task<IActionResult> PutUsuario(int id, Usuarios usuario)
         {
             if (id != usuario.intUsuario)
@@ -306,7 +328,7 @@ namespace BackendTorneosS.Controladores
             return NoContent();
         }
 
-        [Authorize(Roles = "administrador")]
+        [Authorize(Roles = "admin")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUsuario(int id)
         {

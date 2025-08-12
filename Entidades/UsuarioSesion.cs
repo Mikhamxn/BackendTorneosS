@@ -13,6 +13,7 @@ namespace BackendTorneosS.Entidades
         public string strDeviceInfo { get; set; }
         public string strIPAddress { get; set; }
         public DateTime datFechaCreado { get; set; }
+        public string strJti { get; set; }
         public DateTime datExpiracion { get; set; }
         public bool bitRevoked { get; set; }
     }

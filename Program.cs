@@ -8,6 +8,8 @@ using System.Text;
 using BackendTorneosS.Servicios;
 using BackendTorneosS.Contexto;
 using BackendTorneosS.Servicios;
+using Microsoft.AspNetCore.Antiforgery;
+using System.IdentityModel.Tokens.Jwt;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,7 +21,7 @@ var jwtKey = Environment.GetEnvironmentVariable("JWT__KEY");
 var jwtIssuer = Environment.GetEnvironmentVariable("JWT__ISSUER");
 var jwtAudience = Environment.GetEnvironmentVariable("JWT__AUDIENCE");
 var jwtMinutes = Environment.GetEnvironmentVariable("JWT__EXPIREMINUTES");
-
+var DefaultConnection = Environment.GetEnvironmentVariable("DefaultConnection");
 // Configuracion de JWT
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
@@ -37,14 +39,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 
     options.Events = new JwtBearerEvents
     {
-        OnMessageReceived = context =>
-        {
-            // lee la cookie llamada "access_token"
-            if (context.Request.Cookies.TryGetValue("access_token", out var token))
-            {
-                context.Token = token;
-            }
+        OnMessageReceived = ctx => {
+            if (string.IsNullOrEmpty(ctx.Token) &&
+                ctx.Request.Cookies.TryGetValue("access_token", out var t))
+                ctx.Token = t;
             return Task.CompletedTask;
+        },
+        OnTokenValidated = async ctx =>
+        {
+            var db = ctx.HttpContext.RequestServices.GetRequiredService<DBContext>();
+            var jti = ctx.Principal.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+
+            // ¿está revocado o expirado?
+            var invalid = await db.UsuarioSesion.AnyAsync(s =>
+                s.strJti == jti && (s.bitRevoked || s.datExpiracion <= DateTime.UtcNow));
+
+            if (invalid)
+                ctx.Fail("Token revocado o expirado en servidor");
         }
     };
 });
@@ -61,7 +72,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<DBContext>(opts =>
-    opts.UseSqlServer("workstation id=idgsbMikhamxn.mssql.somee.com;packet size=4096;user id=Mikhamxn_SQLLogin_1;pwd=q79ibl4iyr;data source=idgsbMikhamxn.mssql.somee.com;persist security info=False;initial catalog=idgsbMikhamxn;TrustServerCertificate=True\r\n"));
+    opts.UseSqlServer(DefaultConnection));
 
 builder.Services.AddCors(options =>
 {
@@ -73,6 +84,14 @@ builder.Services.AddCors(options =>
                .AllowCredentials();
     });
 });
+
+builder.Services.AddAntiforgery(o => {
+    o.Cookie.Name = "XSRF-TOKEN";
+    o.HeaderName = "X-XSRF-TOKEN";
+    o.Cookie.SameSite = SameSiteMode.None;
+    o.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+});
+
 
 
 var app = builder.Build();
@@ -87,7 +106,9 @@ if (app.Environment.IsDevelopment())
 
     });
 }
-//app.UseHttpsRedirection();
+app.UseHttpsRedirection();
+app.UseHsts();
+
 
 app.UseCors("PermitirFrontend");
 
@@ -96,6 +117,21 @@ app.UseAuthentication();
 
 // 2) Autorización
 app.UseAuthorization();
+
+
+// Middleware para emitir cookie XSRF
+app.Use(async (ctx, next) => {
+    var af = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+    var tokens = af.GetAndStoreTokens(ctx);
+    ctx.Response.Cookies.Append("XSRF-TOKEN", tokens.RequestToken!, new CookieOptions
+    {
+        HttpOnly = false,
+        Secure = true,
+        SameSite = SameSiteMode.None,
+        Path = "/"
+    });
+    await next();
+});
 
 app.MapControllers();
 app.Run();
